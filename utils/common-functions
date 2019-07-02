@@ -23,7 +23,8 @@ function install_ovs {
     fi
 
     ./boot.sh
-    CFLAGS="-O0 -g" ./configure --prefix=/usr
+    #TODO: add CFLAGS as arg?
+    ./configure --prefix=/usr
     make -j5 V=0  ; # no need to be sudo for this...
     make install
 }

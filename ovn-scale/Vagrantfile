@@ -1,0 +1,75 @@
+# Configuration (and defaults)
+ram     = Integer(ENV['VM_MEMORY']   || '300')
+vcpus   = Integer(ENV['VM_CPUS']     || '2')
+workers = Integer(ENV['OVN_WORKERS'] || '1')
+
+def central_name
+    return 'central'
+end
+
+def worker_name(ctrl_id)
+    return 'controller-%d' % [ctrl_id]
+end
+
+def central_ip
+    return '192.168.42.254'
+end
+
+def ctrl_ip(ctrl_id)
+    return '192.168.42.%d' % [ctrl_id + 10]
+end
+
+def ext_ip(ctrl_id)
+    return '192.168.66.%d' % [ctrl_id + 10]
+end
+
+Vagrant.configure(2) do |config|
+
+    config.vm.provider 'libvirt' do |lb|
+        lb.nested = true
+        lb.memory = ram
+        lb.cpus = vcpus
+        lb.suspend_mode = 'managedsave'
+        lb.storage_pool_name = 'images'
+    end
+
+    config.ssh.insert_key = false
+    config.ssh.forward_agent = true
+    config.vm.provision "file", source: "~/.ssh/id_rsa.pub", destination: "~/.ssh/authorized_keys"
+    config.vm.hostname = "ovnhost"
+    config.vm.box = "centos/7"
+    config.vm.synced_folder './', '/vagrant', type: 'rsync'
+    config.vm.synced_folder '../utils', '/vagrant/utils', type: 'rsync'
+
+    config.vm.provision "common-bringup", type: "shell", run: "once" do |s|
+        s.privileged = true
+        s.path = 'common.sh'
+    end
+
+    # central running northd/southd
+    name = central_name()
+    config.vm.define name do |node|
+        node.vm.network 'private_network', ip: central_ip()
+        node.vm.hostname = name
+        node.vm.provision "bringup", type: "shell", run: "once" do |s|
+            s.privileged = true
+            s.path = 'central.sh'
+        end
+    end
+
+    # workers running ovn-controller
+    (0 .. workers - 1).each do |wid|
+        [worker_name(wid)].each do |name|
+            config.vm.define name do |node|
+                node.vm.network 'private_network', ip: ctrl_ip(wid)
+                node.vm.network 'private_network', ip: ext_ip(wid)
+                node.vm.hostname = name
+                node.vm.provision "bringup", type: "shell", run: "once" do |s|
+                    s.privileged = true
+                    s.path = 'worker.sh'
+                    s.args = [ctrl_ip(wid), central_ip()]
+                end
+            end
+        end
+    end
+end
